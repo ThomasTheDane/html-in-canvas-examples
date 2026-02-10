@@ -1,0 +1,285 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WebGL Billboard Example</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #222;
+    color: white;
+    font-family: sans-serif;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  #info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none;
+  }
+</style>
+<div id="info">
+  Arrow Keys: Look Around<br>
+  WASD: Move Camera<br>
+</div>
+<canvas id="gl-canvas"></canvas>
+
+<!-- gl-matrix for vector/matrix math -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+
+<script>
+  // Use globals from gl-matrix script
+  // const { mat4, vec3, quat } = glMatrix;
+
+  const canvas = document.getElementById('gl-canvas');
+  const gl = canvas.getContext('webgl2');
+
+  if (!gl) {
+    alert('WebGL2 not supported');
+  }
+
+  // Shader Sources
+  const vsSource = `#version 300 es
+layout(location = 0) in vec4 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
+
+out vec2 vTexCoord;
+
+void main() {
+  gl_Position = uProjectionMatrix * uModelViewMatrix * aPosition;
+  vTexCoord = aTexCoord;
+}
+`;
+
+  const fsSource = `#version 300 es
+precision highp float;
+
+in vec2 vTexCoord;
+uniform sampler2D uSampler;
+uniform vec4 uColor;
+uniform bool uUseTexture;
+
+out vec4 fragColor;
+
+void main() {
+  if (uUseTexture) {
+    fragColor = texture(uSampler, vTexCoord);
+  } else {
+    fragColor = uColor;
+  }
+}
+`;
+
+  // Initialize Shader Program
+  function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+  }
+
+  const programInfo = {
+    program: program,
+    attribs: {
+      position: gl.getAttribLocation(program, 'aPosition'),
+      texCoord: gl.getAttribLocation(program, 'aTexCoord'),
+    },
+    uniforms: {
+      projection: gl.getUniformLocation(program, 'uProjectionMatrix'),
+      modelView: gl.getUniformLocation(program, 'uModelViewMatrix'),
+      sampler: gl.getUniformLocation(program, 'uSampler'),
+      color: gl.getUniformLocation(program, 'uColor'),
+      useTexture: gl.getUniformLocation(program, 'uUseTexture'),
+    },
+  };
+
+  // Buffers
+  // Quad (Unit size, centered at origin)
+  const positions = new Float32Array([
+    -0.5, 0.5, 0.0,
+    0.5, 0.5, 0.0,
+    -0.5, -0.5, 0.0,
+    0.5, -0.5, 0.0,
+  ]);
+
+  const texCoords = new Float32Array([
+    0.0, 0.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+  ]);
+
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+  const texCoordBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
+
+  // Vertex Array Object
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.enableVertexAttribArray(programInfo.attribs.position);
+  gl.vertexAttribPointer(programInfo.attribs.position, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+  gl.enableVertexAttribArray(programInfo.attribs.texCoord);
+  gl.vertexAttribPointer(programInfo.attribs.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+  // Texture (Blank White)
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+
+  // Camera State
+  const camera = {
+    position: vec3.fromValues(0, 1, 5),
+    rotation: vec3.fromValues(0, 0, 0), // Pitch, Yaw, Roll
+  };
+
+  const keys = {};
+  window.addEventListener('keydown', (e) => keys[e.code] = true);
+  window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+  // Loop
+  let lastTime = 0;
+  function render(time) {
+    time *= 0.001;
+    const deltaTime = time - lastTime;
+    lastTime = time;
+
+    // Update Camera
+    const speed = 5.0 * deltaTime;
+    const rotSpeed = 2.0 * deltaTime;
+
+    // Arrow Keys: Look (Rotate)
+    if (keys['ArrowLeft']) camera.rotation[1] += rotSpeed;
+    if (keys['ArrowRight']) camera.rotation[1] -= rotSpeed;
+    if (keys['ArrowUp']) camera.rotation[0] += rotSpeed;
+    if (keys['ArrowDown']) camera.rotation[0] -= rotSpeed;
+
+    // WASD: Move
+    const forward = vec3.fromValues(Math.sin(camera.rotation[1]), 0, -Math.cos(camera.rotation[1])); // Simple XZ movement
+    const right = vec3.fromValues(Math.cos(camera.rotation[1]), 0, Math.sin(camera.rotation[1]));
+
+    if (keys['KeyW']) vec3.scaleAndAdd(camera.position, camera.position, forward, -speed); // Move forward (negative Z relative to camera facing)
+    // Actually, simple FPS logic:
+    // Forward vector: -Z in local space.
+    // We want to move along the XZ plane based on Yaw.
+    const fwd = vec3.fromValues(-Math.sin(camera.rotation[1]), 0, -Math.cos(camera.rotation[1]));
+    const strafe = vec3.fromValues(Math.cos(camera.rotation[1]), 0, -Math.sin(camera.rotation[1]));
+
+    if (keys['KeyW']) {
+      camera.position[0] += fwd[0] * speed;
+      camera.position[2] += fwd[2] * speed;
+    }
+    if (keys['KeyS']) {
+      camera.position[0] -= fwd[0] * speed;
+      camera.position[2] -= fwd[2] * speed;
+    }
+    if (keys['KeyA']) {
+      camera.position[0] -= strafe[0] * speed;
+      camera.position[2] -= strafe[2] * speed;
+    }
+    if (keys['KeyD']) {
+      camera.position[0] += strafe[0] * speed;
+      camera.position[2] += strafe[2] * speed;
+    }
+
+
+    // Resize Canvas
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    // Clear
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    // Projection
+    const projectionMatrix = mat4.create();
+    mat4.perspective(projectionMatrix, 45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100.0);
+
+    // View
+    const viewMatrix = mat4.create();
+    mat4.rotateX(viewMatrix, viewMatrix, -camera.rotation[0]); // Pitch
+    mat4.rotateY(viewMatrix, viewMatrix, -camera.rotation[1]); // Yaw
+    mat4.translate(viewMatrix, viewMatrix, vec3.negate(vec3.create(), camera.position));
+
+    gl.useProgram(programInfo.program);
+    gl.uniformMatrix4fv(programInfo.uniforms.projection, false, projectionMatrix);
+
+    gl.bindVertexArray(vao);
+
+    // Draw Floor (Grid of quads or just a large quad)
+    const modelViewMatrix = mat4.create();
+    mat4.copy(modelViewMatrix, viewMatrix);
+
+    // Floor (Large Green Quad)
+    const floorMatrix = mat4.clone(modelViewMatrix);
+    mat4.translate(floorMatrix, floorMatrix, [0, -1, 0]);
+    mat4.rotateX(floorMatrix, floorMatrix, -Math.PI / 2);
+    mat4.scale(floorMatrix, floorMatrix, [20, 20, 1]);
+    gl.uniformMatrix4fv(programInfo.uniforms.modelView, false, floorMatrix);
+    gl.uniform4f(programInfo.uniforms.color, 0.2, 0.5, 0.2, 1.0);
+    gl.uniform1i(programInfo.uniforms.useTexture, 0); // Color mode
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Draw Billboard
+    // Positioned off to the side (e.g., X=3, Z=-5)
+    // Billboard typically faces the camera, but here "billboard with blank area" might just mean a sign.
+    // I'll make it a static sign for now. User can "look around" it.
+    const billboardMatrix = mat4.clone(modelViewMatrix);
+    mat4.translate(billboardMatrix, billboardMatrix, [3, 1, -5]); // Off to side
+    // Scale it up a bit
+    mat4.scale(billboardMatrix, billboardMatrix, [4, 3, 1]);
+
+    gl.uniformMatrix4fv(programInfo.uniforms.modelView, false, billboardMatrix);
+    gl.uniform1i(programInfo.uniforms.useTexture, 1); // Texture mode (White Blank)
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform1i(programInfo.uniforms.sampler, 0);
+
+    // If we want it to be "blank", white texture is fine. 
+    // Maybe add a border?
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+</script>

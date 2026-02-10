@@ -1,0 +1,302 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Demo of complex text in canvas</title>
+
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    margin: 20px;
+    background: #f0f2f5;
+  }
+
+  .main-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+
+  canvas {
+    border: 1px solid blue;
+    background: white;
+    width: 638px;
+    height: 318px;
+  }
+
+  .controls {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    min-width: 250px;
+  }
+
+  .control-group {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .control-group:last-child {
+    border-bottom: none;
+  }
+
+  .filter-option {
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  .slider-container {
+    margin-top: 10px;
+    display: none;
+    /* Hidden by default */
+  }
+
+  .slider-container.active {
+    display: block;
+  }
+
+  label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    margin-top: 5px;
+  }
+
+  .value-display {
+    font-size: 0.85em;
+    color: #666;
+    float: right;
+  }
+
+  #draw_element {
+    /* Base style */
+  }
+</style>
+
+<svg style="height: 0; width: 0; position: absolute;">
+  <defs>
+    <filter id="rain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05 1.5" numOctaves="2" result="noise">
+        <animate attributeName="baseFrequency" dur="1s" values="0.05 1.5;0.05 1.6;0.05 1.5" repeatCount="indefinite" />
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+    <filter id="wave">
+      <feTurbulence type="turbulence" baseFrequency="0.01 0.05" numOctaves="2" result="turbulence">
+        <animate attributeName="baseFrequency" dur="2s" values="0.01 0.05; 0.01 0.07; 0.01 0.05"
+          repeatCount="indefinite" />
+      </feTurbulence>
+      <feDisplacementMap id="wave-displacement" in="SourceGraphic" in2="turbulence" scale="10" xChannelSelector="R"
+        yChannelSelector="G" />
+    </filter>
+  </defs>
+</svg>
+
+<div class="main-layout">
+  <canvas id="canvas" width="638" height="318" layoutsubtree="true">
+    <div id="draw_element" style="width: 550px;">
+      Hello from <a href="https://github.com/WICG/html-in-canvas">html-in-canvas</a>!
+      <br>I'm multi-line, <b>formatted</b>,
+      rotated text with emoji (&#128512;), RTL text
+      <span dir=rtl>من فارسی صحبت میکنم</span>,
+      vertical text,
+      <p style="writing-mode: vertical-rl;">
+        这是垂直文本
+      </p>
+      an inline image (<img width="150" src="wolf.jpg">), and
+      <svg width="50" height="50">
+        <circle cx="25" cy="25" r="20" fill="green" />
+        <text x="25" y="30" font-size="15" text-anchor="middle" fill="#fff">
+          SVG
+        </text>
+      </svg>
+    </div>
+  </canvas>
+
+  <div id="not_draw_element" style="width: 550px;">
+    Hello from <a href="https://github.com/WICG/html-in-canvas">html-in-canvas</a>!
+    <br>I'm multi-line, <b>formatted</b>,
+    rotated text with emoji (&#128512;), RTL text
+    <span dir=rtl>من فارسی صحبت میکنم</span>,
+    vertical text,
+    <p style="writing-mode: vertical-rl;">
+      这是垂直文本
+    </p>
+    an inline image (<img width="150" src="wolf.jpg">), and
+    <svg width="50" height="50">
+      <circle cx="25" cy="25" r="20" fill="green" />
+      <text x="25" y="30" font-size="15" text-anchor="middle" fill="#fff">
+        SVG
+      </text>
+    </svg>!
+  </div>
+
+  <div class="controls">
+    <h3>Filters</h3>
+
+    <div class="control-group">
+      <div class="filter-option">
+        <label>
+          <input type="radio" name="filter" value="none" checked> None
+        </label>
+      </div>
+
+      <div class="filter-option">
+        <label>
+          <input type="radio" name="filter" value="blur"> Blur
+        </label>
+        <div class="slider-container" id="blur-controls">
+          <input type="range" min="0" max="5" step="0.1" value="0" id="blur-slider">
+          <span class="value-display">0px</span>
+        </div>
+      </div>
+
+      <div class="filter-option">
+        <label>
+          <input type="radio" name="filter" value="rain"> Rain
+        </label>
+        <div class="slider-container" id="rain-controls">
+          <small style="color: #666;">Animated rain effect</small>
+        </div>
+      </div>
+
+      <div class="filter-option">
+        <label>
+          <input type="radio" name="filter" value="hue-rotate"> Hue Rotate
+        </label>
+        <div class="slider-container" id="hue-controls">
+          <input type="range" min="0" max="360" step="1" value="0" id="hue-slider">
+          <span class="value-display">0deg</span>
+        </div>
+      </div>
+
+      <div class="filter-option">
+        <label>
+          <input type="radio" name="filter" value="wave"> Wave
+        </label>
+        <div class="slider-container" id="wave-controls">
+          <input type="range" min="0" max="50" step="1" value="10" id="wave-slider">
+          <span class="value-display">10</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const ctx = document.getElementById('canvas').getContext('2d');
+  const drawElement = document.getElementById('draw_element');
+  const notDrawElement = document.getElementById('not_draw_element');
+
+  // UI Elements
+  const radioButtons = document.querySelectorAll('input[name="filter"]');
+  const sliders = {
+    blur: { el: document.getElementById('blur-slider'), display: document.querySelector('#blur-controls .value-display') },
+    hue: { el: document.getElementById('hue-slider'), display: document.querySelector('#hue-controls .value-display') },
+    wave: { el: document.getElementById('wave-slider'), display: document.querySelector('#wave-controls .value-display') }
+  };
+  const sliderContainers = {
+    blur: document.getElementById('blur-controls'),
+    rain: document.getElementById('rain-controls'),
+    'hue-rotate': document.getElementById('hue-controls'),
+    wave: document.getElementById('wave-controls')
+  };
+
+  const waveDisplacement = document.getElementById('wave-displacement');
+
+  let currentFilter = 'none';
+
+  function updateFilters() {
+    // Reset basic filters
+    let filterString = '';
+
+    if (currentFilter === 'blur') {
+      const val = sliders.blur.el.value;
+      filterString = `blur(${val}px)`;
+      sliders.blur.display.textContent = `${val}px`;
+    } else if (currentFilter === 'rain') {
+      filterString = `url(#rain)`;
+    } else if (currentFilter === 'hue-rotate') {
+      const val = sliders.hue.el.value;
+      filterString = `hue-rotate(${val}deg)`;
+      sliders.hue.display.textContent = `${val}deg`;
+    } else if (currentFilter === 'wave') {
+      filterString = `url(#wave)`;
+      const val = sliders.wave.el.value;
+      waveDisplacement.scale.baseVal = val;
+      sliders.wave.display.textContent = val;
+    } else {
+      filterString = 'none';
+    }
+
+    drawElement.style.filter = filterString;
+    if (notDrawElement) notDrawElement.style.filter = filterString;
+
+    // Force a re-layout/re-transform update
+    updateTransform();
+  }
+
+  function updateTransform() {
+    // Manually trigger the transform update logic that usually happens on resize
+    // We need to re-apply the base transform + our custom scale
+
+    // Note: ctx.reset() clears the canvas context state (transforms), not the canvas content (though it might?)
+    // ctx.reset() is standard now but check support. If it's supported, it clears state.
+
+    // We recreate the same state as the observer
+    ctx.reset();
+    ctx.rotate((15 * Math.PI) / 180);
+    ctx.translate(80 * devicePixelRatio, -20 * devicePixelRatio);
+
+    // Calculate the base transform required to render the element *at the current context state*
+    // but mapped to 0,0 of the element? 
+    // `drawElementImage` returns a DOMMatrix representing the transform to be applied to the DOM element
+    // so that it aligns with the current drawing context state (rotation/translation).
+    let transform = ctx.drawElementImage(drawElement, 0, 0);
+
+    if (!transform) return;
+
+    drawElement.style.transform = transform.toString();
+  }
+
+  // Event Listeners
+  radioButtons.forEach(btn => {
+    btn.addEventListener('change', (e) => {
+      currentFilter = e.target.value;
+
+      // Update UI visibility
+      Object.values(sliderContainers).forEach(el => {
+        if (el) el.classList.remove('active')
+      });
+      if (sliderContainers[currentFilter]) {
+        sliderContainers[currentFilter].classList.add('active');
+      }
+
+      updateFilters();
+    });
+  });
+
+  Object.values(sliders).forEach(slider => {
+    slider.el.addEventListener('input', updateFilters);
+  });
+
+  onload = () => {
+    const observer = new ResizeObserver(([entry]) => {
+      canvas.width = entry.devicePixelContentBoxSize[0].inlineSize;
+      canvas.height = entry.devicePixelContentBoxSize[0].blockSize;
+      updateTransform();
+    });
+    observer.observe(canvas, { box: 'device-pixel-content-box', fireOnEveryPaint: true });
+
+    // Initial UI state
+    sliderContainers['none'] = null;
+    // Trigger initial update to ensure state is clean
+    updateFilters();
+  }
+</script>

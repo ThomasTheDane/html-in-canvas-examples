@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Demo of complex text in canvas</title>
+
+<style>
+  canvas {
+    border: 1px solid blue;
+    width: 638px;
+    height: 318px;
+  }
+</style>
+
+<canvas id="canvas" width="638" height="318" layoutsubtree="true">
+  <div id="draw_element" style="width: 550px;">
+    Hello from <a href="https://github.com/WICG/html-in-canvas">html-in-canvas</a>!
+    <br>I'm multi-line, <b>formatted</b>,
+    rotated text with emoji (&#128512;), RTL text
+    <span dir=rtl>من فارسی صحبت میکنم</span>,
+    vertical text,
+    <p style="writing-mode: vertical-rl;">
+      这是垂直文本
+    </p>
+    an inline image (<img width="150" src="wolf.jpg">), and
+    <svg width="50" height="50">
+      <circle cx="25" cy="25" r="20" fill="green" />
+      <text x="25" y="30" font-size="15" text-anchor="middle" fill="#fff">
+        SVG
+      </text>
+    </svg>!
+  </div>
+</canvas>
+
+<script>
+  const ctx = document.getElementById('canvas').getContext('2d');
+  onload = () => {
+    const observer = new ResizeObserver(([entry]) => {
+      canvas.width = entry.devicePixelContentBoxSize[0].inlineSize;
+      canvas.height = entry.devicePixelContentBoxSize[0].blockSize;
+
+      ctx.reset();
+      ctx.rotate((15 * Math.PI) / 180); // rotates the context 15 degrees 
+      ctx.translate(80 * devicePixelRatio, -20 * devicePixelRatio); //moves the context to the right a bit 
+      let transform = ctx.drawElementImage(draw_element, 0, 0);
+
+      draw_element.style.transform = transform.toString();
+    });
+    observer.observe(canvas, { box: 'device-pixel-content-box', fireOnEveryPaint: true });
+  }
+</script>

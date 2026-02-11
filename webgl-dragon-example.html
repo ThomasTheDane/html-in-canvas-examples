@@ -372,11 +372,12 @@
     const uBgTextureLoc = gl.getUniformLocation(program, 'uBackgroundTexture');
 
     let lastTime = 0;
+    let rotation = 0;
 
     function render(time) {
-      time *= 0.001;
-      const deltaTime = time - lastTime;
-      lastTime = time;
+      const now = time * 0.001;
+      const deltaTime = now - lastTime;
+      lastTime = now;
 
       if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
         canvas.width = canvas.clientWidth;
@@ -451,8 +452,11 @@
 
       // Reuse projection and view matrices
 
+      rotation += deltaTime * 0.5; // Rotate 0.5 rad/s
+
       const model = mat4.create();
-      mat4.rotateY(model, model, time * 0.5);
+      mat4.rotateY(model, model, rotation);
+      mat4.rotateX(model, model, rotation * 0.5); // Add X rotation for fun
 
       gl.uniformMatrix4fv(uProjectionMatrix, false, projection);
       gl.uniformMatrix4fv(uViewMatrix, false, view);
@@ -477,9 +481,8 @@
 
       gl.disable(gl.BLEND);
 
+      requestAnimationFrame(render);
     }
     requestAnimationFrame(render);
   });
-</script>
-requestAnimationFrame(render);
 </script>

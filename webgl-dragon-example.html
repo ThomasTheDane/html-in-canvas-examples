@@ -424,9 +424,33 @@
       mat4.multiply(finalUiTransform, uiMVP, adjustment);
 
       if (canvas.getElementTransform) {
-        // Convert Float32Array to DOMMatrix (requires array)
-        const domMatrix = new DOMMatrix(Array.from(finalUiTransform));
-        const transform = canvas.getElementTransform(uiElement, domMatrix);
+        // 1. Convert the MVP matrix (gl-matrix Float32Array) to a DOMMatrix
+        const mvpDOM = new DOMMatrix(Array.from(uiMVP));
+
+        // 2. Element CSS pixels -> WebGL Model Space
+        //    Element is 512x512. Quad geometry is -0.5 to 0.5 (size 1).
+        //    Map: (0,0) -> (-0.5, 0.5) and (512,512) -> (0.5, -0.5)
+        const width = uiElement.offsetWidth;
+        const height = uiElement.offsetHeight;
+
+        const toGLModel = new DOMMatrix()
+          // Scale pixels to 1 unit, flip Y (CSS down, GL up)
+          .scale(1 / width, -1 / height, 1)
+          // Center the origin: (0,0) becomes (-width/2, -height/2) before scaling
+          .translate(-width / 2, -height / 2);
+
+        // 3. WebGL Clip Space -> Canvas CSS pixels (Viewport Transform)
+        //    Clip (-1..1) -> Canvas (0..w, 0..h)
+        const toCSSViewport = new DOMMatrix()
+          // Move center (0,0) to center of canvas
+          .translate(canvas.width / 2, canvas.height / 2)
+          // Scale normalized clip (-1..1) to viewport size
+          .scale(canvas.width / 2, -canvas.height / 2, 1);
+
+        // 4. Combine: Viewport * MVP * Model
+        const finalTransform = toCSSViewport.multiply(mvpDOM).multiply(toGLModel);
+
+        const transform = canvas.getElementTransform(uiElement, finalTransform);
         if (transform) {
           uiElement.style.transform = transform.toString();
         }
@@ -456,7 +480,6 @@
 
       const model = mat4.create();
       mat4.rotateY(model, model, rotation);
-      mat4.rotateX(model, model, rotation * 0.5); // Add X rotation for fun
 
       gl.uniformMatrix4fv(uProjectionMatrix, false, projection);
       gl.uniformMatrix4fv(uViewMatrix, false, view);

@@ -1,0 +1,697 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WebGPU Dragon Example</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #111;
+    color: white;
+    font-family: sans-serif;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  #ui-background {
+    width: 512px;
+    height: 512px;
+    background: rgba(0, 20, 40, 0.8);
+    border: 2px solid #0ff;
+    color: #0ff;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-family: 'Courier New', Courier, monospace;
+  }
+
+  .ui-header {
+    font-size: 24px;
+    border-bottom: 2px solid #0ff;
+    padding-bottom: 10px;
+  }
+
+  .ui-row {
+    margin: 10px 0;
+  }
+
+  input[type="range"] {
+    width: 100%;
+  }
+
+  input[type="text"] {
+    background: #000;
+    color: #0f0;
+    border: 1px solid #0f0;
+    padding: 5px;
+    width: 100%;
+  }
+</style>
+<canvas id="gpu-canvas" layoutsubtree>
+  <div id="ui-background">
+    <div class="ui-header">DRAGON SYSTEMS</div>
+    <div class="ui-row">
+      <label>SCANNING...</label>
+      <input type="range" min="0" max="100" value="50">
+    </div>
+    <div class="ui-row">
+      <label>TARGET DATA</label>
+      <input type="text" value="COORDS: 45.33, 92.11">
+    </div>
+    <div class="ui-row">
+      STATUS: OPERATIONAL
+      <br>
+      SYSTEM INTEGRITY: 98%
+    </div>
+  </div>
+</canvas>
+
+<!-- gl-matrix -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+
+<script type="module">
+  const canvas = document.getElementById('gpu-canvas');
+  const uiElement = document.getElementById('ui-background');
+
+  if (!navigator.gpu) {
+    alert('WebGPU not supported');
+    throw new Error('WebGPU not supported');
+  }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    alert('No WebGPU adapter found');
+    throw new Error('No WebGPU adapter found');
+  }
+
+  const device = await adapter.requestDevice();
+  const context = canvas.getContext('webgpu');
+  const format = navigator.gpu.getPreferredCanvasFormat();
+
+  context.configure({
+    device,
+    format,
+    alphaMode: 'premultiplied',
+  });
+
+  // --- WGSL Shaders ---
+
+  // UI Shader (Unlit, textured quad)
+  const uiShaderCode = `
+    struct Uniforms {
+      modelViewProjectionMatrix: mat4x4<f32>,
+    };
+    @binding(0) @group(0) var<uniform> uniforms : Uniforms;
+    @binding(1) @group(0) var mySampler : sampler;
+    @binding(2) @group(0) var myTexture : texture_2d<f32>;
+
+    struct VertexOutput {
+      @builtin(position) Position : vec4<f32>,
+      @location(0) uv : vec2<f32>,
+    };
+
+    @vertex
+    fn vs_main(@location(0) position : vec3<f32>, @location(1) uv : vec2<f32>) -> VertexOutput {
+      var output : VertexOutput;
+      output.Position = uniforms.modelViewProjectionMatrix * vec4<f32>(position, 1.0);
+      output.uv = uv;
+      return output;
+    }
+
+    @fragment
+    fn fs_main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+      return textureSample(myTexture, mySampler, uv);
+    }
+  `;
+
+  // Dragon Shader (Glass PBR-ish)
+  const dragonShaderCode = `
+    struct Uniforms {
+      modelViewMatrix : mat4x4<f32>,
+      projectionMatrix : mat4x4<f32>, // Separate projection for easy normal calc or split
+      // Combined MVP is usually better but let's stick to separated for similar logic
+    };
+    
+    // We'll bundle matrices for simplicity
+    struct Matrices {
+      model : mat4x4<f32>, // World
+      view : mat4x4<f32>,
+      projection : mat4x4<f32>,
+    };
+    @binding(0) @group(0) var<uniform> matrices : Matrices; // Common uniform buffer? Or separated?
+
+    struct Params {
+        resolution: vec2<f32>,
+    };
+    @binding(1) @group(0) var<uniform> params: Params;
+
+    @binding(2) @group(0) var mySampler : sampler;
+    @binding(3) @group(0) var dragonTexture : texture_2d<f32>;       // Base Color
+    @binding(4) @group(0) var backgroundTexture : texture_2d<f32>;   // Refraction source
+
+    struct VertexInput {
+        @location(0) position : vec3<f32>,
+        @location(1) normal : vec3<f32>,
+        @location(2) uv : vec2<f32>,
+    };
+
+    struct VertexOutput {
+        @builtin(position) Position : vec4<f32>,
+        @location(0) uv : vec2<f32>,
+        @location(1) normal : vec3<f32>,       // View Space Normal
+        @location(2) viewPosition : vec3<f32>, // View Space Position
+        @location(3) clipPos : vec4<f32>,      // To calculate screen UV
+    };
+
+    @vertex
+    fn vs_main(input : VertexInput) -> VertexOutput {
+        var output : VertexOutput;
+        let viewPos = matrices.view * matrices.model * vec4<f32>(input.position, 1.0);
+        output.Position = matrices.projection * viewPos;
+        output.uv = input.uv;
+        
+        // Normal to view space (Assuming uniform scale, otherwise invoke inverse transpose)
+        let normalMatrix = mat3x3<f32>(
+            matrices.view[0].xyz,
+            matrices.view[1].xyz,
+            matrices.view[2].xyz
+        ) * mat3x3<f32>(
+            matrices.model[0].xyz,
+            matrices.model[1].xyz,
+            matrices.model[2].xyz
+        );
+        output.normal = normalize(normalMatrix * input.normal);
+        output.viewPosition = viewPos.xyz;
+        output.clipPos = output.Position;
+        
+        return output;
+    }
+
+    @fragment
+    fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
+        let normal = normalize(input.normal);
+        let viewDir = normalize(-input.viewPosition);
+
+        // Screen UV for refraction
+        // Clip Space (-1..1) to UV (0..1)
+        let ndc = input.clipPos.xy / input.clipPos.w;
+        var screenUV = ndc * 0.5 + 0.5;
+        screenUV.y = 1.0 - screenUV.y; // Flip Y for texture sampling if needed (WebGPU coords top-left usually 0,0? texture coords are 0,0 top-left)
+
+        // Refraction Offset
+        let refractionOffset = normal.xy * 0.05;
+        let bgColor = textureSample(backgroundTexture, mySampler, screenUV + refractionOffset);
+
+        // Base Color
+        let texColor = textureSample(dragonTexture, mySampler, input.uv);
+
+        // Fresnel
+        let fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.0);
+
+        // Specular
+        let lightDir = normalize(vec3<f32>(0.5, 1.0, 0.7));
+        let halfVector = normalize(lightDir + viewDir);
+        let NdotH = max(dot(normal, halfVector), 0.0);
+        let specular = pow(NdotH, 32.0);
+
+        // Mix
+        let glassColor = mix(bgColor.rgb, texColor.rgb, 0.3 * texColor.a);
+        let finalColor = glassColor + vec3<f32>(specular) + vec3<f32>(fresnel * 0.3);
+
+        return vec4<f32>(finalColor, 0.9);
+    }
+  `;
+
+  // --- Buffers & Data ---
+
+  // UI Quad Data
+  const uiPositions = new Float32Array([
+    -0.5, 0.5, 0.0,
+    -0.5, -0.5, 0.0,
+    0.5, 0.5, 0.0,
+    0.5, -0.5, 0.0,
+  ]); // Triangle Strip
+
+  const uiUVs = new Float32Array([
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    1.0, 1.0,
+  ]);
+
+  function createBuffer(device, data, usage) {
+    const buffer = device.createBuffer({
+      size: data.byteLength,
+      usage: usage | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    });
+    new (data.constructor)(buffer.getMappedRange()).set(data);
+    buffer.unmap();
+    return buffer;
+  }
+
+  const uiPosBuffer = createBuffer(device, uiPositions, GPUBufferUsage.VERTEX);
+  const uiUVBuffer = createBuffer(device, uiUVs, GPUBufferUsage.VERTEX);
+
+  // Load Dragon
+  async function loadDragon() {
+    const binResponse = await fetch('stanford_dragon_pbr/scene.bin');
+    const binBuffer = await binResponse.arrayBuffer();
+
+    // Offsets from GLTF (reused from WebGL example)
+    const indicesOffset = 0;
+    const indicesLength = 231984; // bytes
+    const indicesData = new Uint32Array(binBuffer, indicesOffset, indicesLength / 4);
+
+    const posNormBufferViewOffset = 320320;
+    const posNormBufferViewLength = 265008;
+    const posNormData = new Float32Array(binBuffer, posNormBufferViewOffset, posNormBufferViewLength / 4);
+
+    const uvBufferViewOffset = 231984;
+    const uvBufferViewLength = 88336;
+    const uvData = new Float32Array(binBuffer, uvBufferViewOffset, uvBufferViewLength / 4);
+
+    // Create Buffers
+    const indexBuffer = createBuffer(device, indicesData, GPUBufferUsage.INDEX);
+    const posNormBuffer = createBuffer(device, posNormData, GPUBufferUsage.VERTEX);
+    const uvBuffer = createBuffer(device, uvData, GPUBufferUsage.VERTEX);
+
+    // Load Texture
+    const imgBitmap = await createImageBitmap(await (await fetch('stanford_dragon_pbr/textures/DefaultMaterial_baseColor.jpeg')).blob());
+    const texture = device.createTexture({
+      size: [imgBitmap.width, imgBitmap.height, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture({ source: imgBitmap }, { texture: texture }, [imgBitmap.width, imgBitmap.height]);
+
+    return {
+      indexBuffer,
+      posNormBuffer,
+      uvBuffer,
+      indexCount: indicesData.length,
+      texture
+    };
+  }
+
+  const dragon = await loadDragon();
+
+  // --- Pipelines ---
+
+  // UI Pipeline
+  const uiPipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: device.createShaderModule({ code: uiShaderCode }),
+      entryPoint: 'vs_main',
+      buffers: [
+        {
+          arrayStride: 12, // vec3<f32>
+          attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }]
+        },
+        {
+          arrayStride: 8, // vec2<f32>
+          attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x2' }]
+        }
+      ]
+    },
+    fragment: {
+      module: device.createShaderModule({ code: uiShaderCode }),
+      entryPoint: 'fs_main',
+      targets: [{
+        format: format,
+        blend: {
+          color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+        }
+      }]
+    },
+    primitive: { topology: 'triangle-strip' },
+    depthStencil: {
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+      format: 'depth24plus',
+    }
+  });
+
+  // Dragon Pipeline
+  const dragonPipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: device.createShaderModule({ code: dragonShaderCode }),
+      entryPoint: 'vs_main',
+      buffers: [
+        // Pos + Normal are interleaved in one buffer? 
+        // Wait, previous code says:
+        // Accessor 0: POSITION - View 2, offset 0
+        // Accessor 1: NORMAL - View 2, offset 132504
+        // View 2 length = 265008. 
+        // So View 2 has Position (11042 * 12 = 132504 bytes) THEN Normal (11042 * 12).
+        // They are NOT interleaved per vertex. They are packed sequentially.
+        // We need to set up vertex attributes to read from the SAME buffer but different offsets/strides?
+        // Actually WebGPU buffers... we can bind the same buffer to two slots with different offsets.
+        {
+          arrayStride: 12,
+          attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] // Position
+        },
+        {
+          arrayStride: 12,
+          attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] // Normal
+        },
+        {
+          arrayStride: 8,
+          attributes: [{ shaderLocation: 2, offset: 0, format: 'float32x2' }] // UV
+        }
+      ]
+    },
+    fragment: {
+      module: device.createShaderModule({ code: dragonShaderCode }),
+      entryPoint: 'fs_main',
+      targets: [{
+        format: format,
+        blend: {
+          color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+        }
+      }]
+    },
+    depthStencil: {
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+      format: 'depth24plus',
+    }
+  });
+
+  // --- Depth Texture ---
+  let depthTexture = null;
+  function updateDepthTexture() {
+    if (depthTexture) depthTexture.destroy();
+    depthTexture = device.createTexture({
+      size: [canvas.width, canvas.height],
+      format: 'depth24plus',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
+  updateDepthTexture();
+
+  // --- Background Texture (for refraction) ---
+  let bgTexture = null;
+  function updateBgTexture() {
+    if (bgTexture) bgTexture.destroy();
+    bgTexture = device.createTexture({
+      size: [canvas.width, canvas.height],
+      format: format, // Match canvas format
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
+  updateBgTexture();
+
+  // --- UI Texture ---
+  // We'll create it every frame or keep one? 
+  // html-in-canvas usually provides the element which we upload.
+  const uiTexture = device.createTexture({
+    size: [512, 512, 1],
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+
+  // --- Uniform Buffers ---
+  const uniformBufferSize = 64; // mat4
+  const uiUniformBuffer = device.createBuffer({
+    size: uniformBufferSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Dragon Uniforms: Model(64) + View(64) + Proj(64) = 192 bytes
+  // Params: Resolution(8) + Pad(8) = 16 bytes. Total 208?
+  // Let's use 256 for alignment safety.
+  // Actually, split them for clarity in shader binding?
+  // Shader expects:
+  // binding 0: Matrices (struct { model, view, proj }) -> 3 * 64 = 192 bytes
+  // binding 1: Params (struct { res }) -> 16 bytes (vec2 + padding)
+
+  const dragonMatrixBuffer = device.createBuffer({
+    size: 192,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  const dragonParamsBuffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  const sampler = device.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+    addressModeU: 'clamp-to-edge',
+    addressModeV: 'clamp-to-edge',
+  });
+
+  // --- Bind Groups ---
+  const uiBindGroup = device.createBindGroup({
+    layout: uiPipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uiUniformBuffer } },
+      { binding: 1, resource: sampler },
+      { binding: 2, resource: uiTexture.createView() }
+    ]
+  });
+
+  // Dragon Bind Group (Needs dynamic BG texture... actually we can just update the bgTexture content, so the bind group can be static if view helps)
+  // Wait, if we recreate bgTexture on resize, we need new BindGroup.
+  let dragonBindGroup = null;
+  function createDragonBindGroup() {
+    dragonBindGroup = device.createBindGroup({
+      layout: dragonPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: dragonMatrixBuffer } },
+        { binding: 2, resource: sampler },
+        { binding: 3, resource: dragon.texture.createView() },
+        { binding: 4, resource: bgTexture.createView() }
+      ]
+    });
+  }
+  createDragonBindGroup();
+
+
+  // --- Render Loop ---
+
+  let rotation = 0;
+  let lastTime = 0;
+
+  function render(time) {
+    const now = time * 0.001;
+    const deltaTime = now - lastTime;
+    lastTime = now;
+
+    // Resize
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      updateDepthTexture();
+      updateBgTexture();
+      createDragonBindGroup(); // New bgTexture view needed
+    }
+
+    // --- Matricess ---
+    const projection = mat4.create();
+    mat4.perspective(projection, 45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 1000.0);
+
+    const view = mat4.create();
+    mat4.lookAt(view, [0, 50, 150], [0, 40, 0], [0, 1, 0]);
+
+    // UI Model
+    const uiModel = mat4.create();
+    mat4.translate(uiModel, uiModel, [0, 50, -50]);
+    mat4.scale(uiModel, uiModel, [200, 200, 1]);
+
+    const uiMVP = mat4.create();
+    mat4.multiply(uiMVP, projection, view);
+    mat4.multiply(uiMVP, uiMVP, uiModel);
+
+    // Upload UI Uniforms
+    device.queue.writeBuffer(uiUniformBuffer, 0, uiMVP);
+
+    // Update UI Transform (HTML-in-Canvas logic)
+    // Map 0..1 to -0.5..0.5
+    const adjustment = mat4.create();
+    mat4.translate(adjustment, adjustment, [-0.5, 0.5, 0]);
+    mat4.scale(adjustment, adjustment, [1, -1, 1]);
+
+    const toCSSViewport = new DOMMatrix()
+      .translate(canvas.width / 2, canvas.height / 2)
+      .scale(canvas.width / 2, -canvas.height / 2, 1);
+
+    if (canvas.getElementTransform) {
+      const finalUiTransform = mat4.create();
+      mat4.multiply(finalUiTransform, uiMVP, adjustment);
+
+      const mvpDOM = new DOMMatrix(Array.from(finalUiTransform));
+      const width = uiElement.offsetWidth;
+      const height = uiElement.offsetHeight;
+      const toGLModel = new DOMMatrix()
+        .scale(1 / width, -1 / height, 1)
+        .translate(-width / 2, -height / 2);
+
+      // Combined: CanvasViewport * MVP * QuadCheck * CSSModel
+      // Wait, 'finalUiTransform' already has MVP * Adjustment.
+      // Adjustment maps 0..1 to -0.5..0.5.
+      // toGLModel maps pixels to 0..1 basically (if we ignored adjustment).
+      // Let's re-verify the logic from billboard/tunnel.
+
+      // Tunnel Logic:
+      // 4. Combine: Viewport * MVP * Model
+      // const finalTransform = toCSSViewport.multiply(mvpDOM).multiply(toGLModel);
+      // And MVP was just Proj * View * Model.
+      // It didn't assume 0..1 quad?
+
+      // Original Dragon Logic (WebGL):
+      // adjustment: [-0.5, 0.5, 0] translate, [1, -1, 1] scale.
+      // Maps (0,0) -> (-0.5, 0.5) top-left.
+      // finalUiTransform = uiMVP * adjustment.
+
+      // So let's stick to that.
+      // We have 'finalUiTransform' (MVP * Adjustment).
+      // We need Viewport * FinalUiTransform * PixelToUnit.
+
+      // PixelToUnit:
+      // scale(1/w, 1/h, 1). // No translate if we assume we just map pixels to 0..1
+      // But finalUiTransform expects 0..1 input (due to Adjustment).
+      // So PixelToUnit just needs to scale pixels to 0..1.
+
+      const pixelToUnit = new DOMMatrix().scale(1 / width, 1 / height, 1);
+
+      // This seems different from the tunnel/billboard logic but follows the Dragon logic?
+      // Let's just blindly copy the tunnel logic structure if possible, but tunnel assumed centered quad 1x1?
+      // Tunnel: "const toGLModel = new DOMMatrix().scale(1/w, -1/h, 1).translate(-w/2, -h/2);"
+      // This maps pixels to (-0.5, 0.5) directly?
+      // If our Quad is -0.5..0.5, then yes.
+      // Our UI Quad is -0.5..0.5 (lines 330-335).
+
+      // So Tunnel Logic should work if we pass the RAW MVP (without adjustment).
+
+      const rawMvpDOM = new DOMMatrix(Array.from(uiMVP));
+      const tunnelToGLModel = new DOMMatrix()
+        .scale(1 / width, -1 / height, 1)
+        .translate(-width / 2, -height / 2);
+
+      const finalTransform = toCSSViewport.multiply(rawMvpDOM).multiply(tunnelToGLModel);
+      const transform = canvas.getElementTransform(uiElement, finalTransform);
+      if (transform) uiElement.style.transform = transform.toString();
+    }
+
+    // Update UI Texture
+    /* 
+    // Update UI Texture - Disabled for WebGPU until polyfill works
+    if (device.queue.copyExternalImageToTexture) {
+      device.queue.copyExternalImageToTexture(
+        { source: uiElement },
+        { texture: uiTexture },
+        [512, 512]
+      );
+    }
+    */
+
+    // Dragon Matrices
+    rotation += deltaTime * 0.5;
+    const dragonModel = mat4.create();
+    mat4.rotateY(dragonModel, dragonModel, rotation);
+
+    const dragonMatrices = new Float32Array(16 * 3);
+    dragonMatrices.set(dragonModel, 0);
+    dragonMatrices.set(view, 16);
+    dragonMatrices.set(projection, 32);
+    device.queue.writeBuffer(dragonMatrixBuffer, 0, dragonMatrices);
+
+    const dragonParams = new Float32Array([canvas.width, canvas.height, 0, 0]);
+    device.queue.writeBuffer(dragonParamsBuffer, 0, dragonParams);
+
+    // --- Command Encoding ---
+
+    const commandEncoder = device.createCommandEncoder();
+
+    // Pass 1: Render UI to Background Texture (Grab Pass)
+    // Actually we want to render the UI to the screen AND keep a copy for refraction.
+    // But we can't easily read back from screen in one pass without separate textures.
+    // Strategy: Render UI to `bgTexture`. Then copy `bgTexture` to Screen?
+    // Or Render UI directly to Screen, then `copyTextureToTexture` Screen->bgTexture.
+    // WebGPU current texture is `context.getCurrentTexture()`.
+    // We can render to it.
+
+    const textureView = context.getCurrentTexture().createView();
+
+    const passControl = {
+      colorAttachments: [{
+        view: textureView,
+        clearValue: { r: 0.1, g: 0.1, b: 0.1, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: depthTexture.createView(),
+        depthClearValue: 1.0,
+        depthLoadOp: 'clear',
+        depthStoreOp: 'store',
+      }
+    };
+
+    // Pass 1: Draw UI
+    const passEncoder = commandEncoder.beginRenderPass(passControl);
+    passEncoder.setPipeline(uiPipeline);
+    passEncoder.setBindGroup(0, uiBindGroup);
+    passEncoder.setVertexBuffer(0, uiPosBuffer);
+    passEncoder.setVertexBuffer(1, uiUVBuffer);
+    passEncoder.draw(4);
+    passEncoder.end();
+
+    // Copy Screen to BgTexture for Refraction
+    // copyTextureToTexture must happen outside render pass
+    commandEncoder.copyTextureToTexture(
+      { texture: context.getCurrentTexture() },
+      { texture: bgTexture },
+      [canvas.width, canvas.height]
+    );
+
+    // Pass 2: Draw Dragon
+    const passControl2 = {
+      colorAttachments: [{
+        view: textureView,
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: depthTexture.createView(),
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      }
+    };
+
+    const passEncoder2 = commandEncoder.beginRenderPass(passControl2);
+    passEncoder2.setPipeline(dragonPipeline);
+    passEncoder2.setBindGroup(0, dragonBindGroup);
+
+    // Slot 0: Positions (Offset 0 in posNormBuffer)
+    // Slot 1: Normals (Offset 132504 in posNormBuffer)
+    // Slot 2: UVs (Offset 0 in uvBuffer)
+
+    passEncoder2.setVertexBuffer(0, dragon.posNormBuffer, 0);       // Position
+    passEncoder2.setVertexBuffer(1, dragon.posNormBuffer, 132504);  // Normal
+    passEncoder2.setVertexBuffer(2, dragon.uvBuffer);               // UV
+
+    passEncoder2.setIndexBuffer(dragon.indexBuffer, 'uint32');
+    passEncoder2.drawIndexed(dragon.indexCount);
+    passEncoder2.end();
+
+    device.queue.submit([commandEncoder.finish()]);
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+
+</script>

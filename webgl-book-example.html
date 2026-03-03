@@ -114,7 +114,6 @@
 
       uniform float uTurnProgress;
       uniform float uPageWidth;
-      uniform float uIsFront; 
 
       out vec2 vTexCoord;
       out vec3 vNormal;
@@ -143,14 +142,12 @@
 
           // Approximate normals for lighting
           vec3 n = aNormal;
-          if (uIsFront == 0.0) { n.z = -1.0; }
           float nx = n.x * cos(theta) - n.z * sin(theta);
           float nz = n.x * sin(theta) + n.z * cos(theta);
           vNormal = mat3(uModel) * vec3(nx, n.y, nz);
           
           vWorldPos = worldPos.xyz;
           vTexCoord = aTexCoord;
-          if (uIsFront == 0.0) { vTexCoord.x = 1.0 - vTexCoord.x; }
       }`;
 
       const fsSource = `#version 300 es
@@ -160,23 +157,30 @@
       in vec3 vNormal;
       in vec3 vWorldPos;
 
-      uniform sampler2D uSampler;
-      uniform float uIsFront;
+      uniform sampler2D uFrontTex;
+      uniform sampler2D uBackTex;
       
       out vec4 fragColor;
 
       void main() {
-          vec4 texColor = texture(uSampler, vTexCoord);
+          vec2 texCoord = vTexCoord;
+          vec4 texColor;
           vec3 n = normalize(vNormal);
+
+          if (gl_FrontFacing) {
+              texColor = texture(uFrontTex, texCoord);
+          } else {
+              texCoord.x = 1.0 - texCoord.x;
+              texColor = texture(uBackTex, texCoord);
+              n = -n;
+          }
+
           vec3 lightDir = normalize(vec3(0.4, 0.8, 0.8)); // angled lit
-          
-          // We use max dot with abs to loosely handle back lit situations, but backfaces are culled anyway
           float diff = max(dot(n, lightDir), 0.3); 
           vec3 color = texColor.rgb * diff;
           
           // Spine shadow gradient
-          float distToSpine = vTexCoord.x;
-          if (uIsFront == 0.0) { distToSpine = 1.0 - vTexCoord.x; }
+          float distToSpine = gl_FrontFacing ? vTexCoord.x : (1.0 - vTexCoord.x);
           float shadow = mix(0.4, 1.0, smoothstep(0.0, 0.2, distToSpine));
           color *= shadow;
 
@@ -206,8 +210,8 @@
           uModel: gl.getUniformLocation(program, 'uModel'),
           uTurnProgress: gl.getUniformLocation(program, 'uTurnProgress'),
           uPageWidth: gl.getUniformLocation(program, 'uPageWidth'),
-          uIsFront: gl.getUniformLocation(program, 'uIsFront'),
-          uSampler: gl.getUniformLocation(program, 'uSampler')
+          uFrontTex: gl.getUniformLocation(program, 'uFrontTex'),
+          uBackTex: gl.getUniformLocation(program, 'uBackTex')
       };
 
       const plane = createPlane(PAGE_WIDTH, PAGE_HEIGHT, 50, 50);
@@ -328,8 +332,7 @@
           gl.clearColor(0.1, 0.1, 0.1, 1.0);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
           gl.enable(gl.DEPTH_TEST);
-          gl.enable(gl.CULL_FACE);
-          gl.cullFace(gl.BACK);
+          gl.disable(gl.CULL_FACE);
 
           gl.useProgram(program);
 
@@ -361,14 +364,14 @@
               gl.uniformMatrix4fv(uniforms.uModel, false, model);
               gl.uniform1f(uniforms.uTurnProgress, t);
 
-              // Draw Front
-              gl.uniform1f(uniforms.uIsFront, 1.0);
+              gl.activeTexture(gl.TEXTURE0);
               gl.bindTexture(gl.TEXTURE_2D, p.frontTex);
-              gl.drawElements(gl.TRIANGLES, plane.indices.length, gl.UNSIGNED_SHORT, 0);
+              gl.uniform1i(uniforms.uFrontTex, 0);
 
-              // Draw Back
-              gl.uniform1f(uniforms.uIsFront, 0.0);
+              gl.activeTexture(gl.TEXTURE1);
               gl.bindTexture(gl.TEXTURE_2D, p.backTex);
+              gl.uniform1i(uniforms.uBackTex, 1);
+
               gl.drawElements(gl.TRIANGLES, plane.indices.length, gl.UNSIGNED_SHORT, 0);
           }
 

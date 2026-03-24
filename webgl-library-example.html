@@ -1,0 +1,658 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Interactive 3D WebGL Library</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0a14; color: white; font-family: 'Georgia', serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(15, 15, 25, 0.85);
+            padding: 20px;
+            border-radius: 12px;
+            pointer-events: none;
+            border: 1px solid rgba(255,255,255,0.1);
+            z-index: 1000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        
+        h1 { margin: 0 0 10px 0; font-size: 24px; color: #fff; text-transform: uppercase; letter-spacing: 2px; }
+        .controls { font-size: 14px; color: #aaa; font-family: sans-serif; line-height: 1.6; }
+        .tag { display: inline-block; padding: 2px 6px; background: #ff007f; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 5px; }
+
+        /* Bookshelf DOM Styles */
+        #bookshelf {
+            width: 1000px;
+            height: 600px;
+            background: linear-gradient(to bottom, #2b1b10, #1a100a);
+            border: 30px solid #3c2314;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.8);
+            border-radius: 4px;
+        }
+
+        .shelf-row {
+            height: 250px;
+            border-bottom: 20px solid #3c2314;
+            display: flex;
+            align-items: flex-end;
+            padding: 0 20px;
+            gap: 15px;
+        }
+        
+        .shelf-row:last-child {
+            border-bottom: none;
+        }
+
+        .book-spine {
+            width: 50px;
+            height: 180px;
+            background: linear-gradient(to right, #2c3e50, #34495e);
+            border-radius: 5px 5px 0 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #ecf0f1;
+            font-size: 14px;
+            font-weight: bold;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5), inset 0 0 20px rgba(255,255,255,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .book-spine:hover {
+            transform: translateY(-10px) scale(1.05);
+            box-shadow: 0 15px 25px rgba(0,0,0,0.7), 0 0 20px rgba(255,0,127,0.5);
+            border-color: #ff007f;
+        }
+
+        .spine-sherlock {
+            width: 70px;
+            height: 220px;
+            background: linear-gradient(to right, #c0392b, #e74c3c);
+            font-size: 18px;
+            letter-spacing: 1px;
+        }
+
+        .spine-blue { background: linear-gradient(to right, #2980b9, #3498db); height: 200px; }
+        .spine-green { background: linear-gradient(to right, #27ae60, #2ecc71); height: 190px; }
+        .spine-gold { background: linear-gradient(to right, #f39c12, #f1c40f); height: 210px; color: #333; }
+
+        /* Book Page DOM Styles */
+        .book-page {
+            position: absolute;
+            width: 800px;
+            height: 1200px;
+            background-color: #fdf6e3;
+            color: #333;
+            box-sizing: border-box;
+            padding: 80px;
+            font-family: 'Georgia', serif;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            pointer-events: auto; /* enable interaction when active */
+        }
+
+        .book-page.cover {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            align-items: center;
+            border: 20px solid #ecf0f1;
+            padding: 40px;
+        }
+
+        .book-page h2 { font-size: 60px; margin-bottom: 20px; text-align: center; }
+        .book-page p { font-size: 32px; line-height: 1.6; margin-bottom: 30px; text-align: justify; }
+        .page-number { position: absolute; bottom: 40px; width: 100%; text-align: center; font-size: 24px; left: 0; color: #777; }
+    </style>
+</head>
+<body>
+    <div id="ui-overlay">
+        <h1>Grand Library</h1>
+        <div class="controls">
+            <span class="tag">WASD</span> Walk<br>
+            <span class="tag">Arrows</span> Look / Turn Pages<br>
+            <span class="tag">Click</span> Books / Interactions<br>
+            <div id="prompt" style="margin-top:10px; color:#ff007f; font-weight:bold;">Find the Sherlock Holmes book on the shelf!</div>
+        </div>
+    </div>
+
+    <canvas id="gl-canvas" layoutsubtree>
+        <!-- Bookshelf UI Element -->
+        <div id="draw_element">
+            <div id="bookshelf">
+                <div class="shelf-row">
+                    <div class="book-spine spine-blue">Cosmos vol I</div>
+                    <div class="book-spine spine-gold">The Alchemist</div>
+                    <div class="book-spine spine-green">A Brief History</div>
+                    <div class="book-spine spine-sherlock" id="sherlock-spine">SHERLOCK HOLMES</div>
+                    <div class="book-spine spine-blue">Moby Dick</div>
+                </div>
+                <div class="shelf-row">
+                    <div class="book-spine spine-gold">Frankenstein</div>
+                    <div class="book-spine spine-blue">Dracula</div>
+                    <div class="book-spine spine-green">The Odyssey</div>
+                    <div class="book-spine spine-gold">Dune</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Book Pages (Rendered into textures) -->
+        <div id="page-0" class="book-page cover">
+            <h2>The Adventures of<br>Sherlock Holmes</h2>
+            <p style="text-align:center;">By Arthur Conan Doyle</p>
+        </div>
+        <div id="page-1" class="book-page"></div>
+        <div id="page-2" class="book-page">
+            <h2>A Scandal in Bohemia</h2>
+            <p>To Sherlock Holmes she is always the woman. I have seldom heard him mention her under any other name. In his
+                eyes she eclipses and predominates the whole of her sex.</p>
+            <p>It was not that he felt any emotion akin to love for Irene Adler. All emotions were abhorrent to his cold, precise but admirably balanced mind.</p>
+            <div class="page-number">2</div>
+        </div>
+        <div id="page-3" class="book-page">
+            <p>He was, I take it, the most perfect reasoning and observing machine that the world has seen, but as a lover
+                he would have placed himself in a false position.</p>
+            <p>He never spoke of the softer passions, save with a gibe and a sneer. They were admirable things for the observer.</p>
+            <div class="page-number">3</div>
+        </div>
+        <div id="page-4" class="book-page">
+            <p>I had seen little of Holmes lately. My marriage had drifted us away from each other. My own complete happiness was sufficient to absorb all my attention.</p>
+            <p>While Holmes, who loathed every form of society with his whole Bohemian soul, remained in our lodgings in Baker Street, buried among his old books.</p>
+            <div class="page-number">4</div>
+        </div>
+        <div id="page-5" class="book-page cover" style="background-color:#1a252f;">
+            <h2>The End</h2>
+        </div>
+    </canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <script>
+        // Polyfill glMatrix namespace for v2.8.1 CDN
+        const glMatrix = {
+            mat4: window.mat4,
+            vec3: window.vec3
+        };
+
+        const PAGE_WIDTH = 2.0;
+        const PAGE_HEIGHT = 3.0;
+
+        const canvas = document.getElementById('gl-canvas');
+        const gl = canvas.getContext('webgl2', { antialias: true });
+        if (!gl) { alert('WebGL2 not supported'); throw new Error('WebGL2 not supported'); }
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        });
+        window.dispatchEvent(new Event('resize'));
+
+        // --- Mesh Utilities ---
+        function createPlane(width, height, segX, segY) {
+            const positions = [], normals = [], uvs = [], indices = [];
+            for (let y = 0; y <= segY; y++) {
+                for (let x = 0; x <= segX; x++) {
+                    const u = x / segX;
+                    const v = y / segY;
+                    positions.push(u * width, (v - 0.5) * height, 0);
+                    normals.push(0, 0, 1);
+                    uvs.push(u, 1.0 - v);
+                }
+            }
+            for (let y = 0; y < segY; y++) {
+                for (let x = 0; x < segX; x++) {
+                    const p1 = y * (segX + 1) + x;
+                    const p2 = p1 + 1;
+                    const p3 = (y + 1) * (segX + 1) + x;
+                    const p4 = p3 + 1;
+                    indices.push(p1, p2, p3);
+                    indices.push(p2, p4, p3);
+                }
+            }
+            return {
+                positions: new Float32Array(positions),
+                normals: new Float32Array(normals),
+                uvs: new Float32Array(uvs),
+                indices: new Uint16Array(indices)
+            };
+        }
+
+        // --- Shader Source definitions ---
+        const vsUnlit = `#version 300 es
+        layout(location=0) in vec4 aPosition;
+        layout(location=1) in vec2 aTexCoord;
+        uniform mat4 uProjection;
+        uniform mat4 uView;
+        uniform mat4 uModel;
+        out vec2 vTexCoord;
+        void main() {
+            gl_Position = uProjection * uView * uModel * aPosition;
+            vTexCoord = aTexCoord;
+        }`;
+
+        const fsUnlit = `#version 300 es
+        precision highp float;
+        in vec2 vTexCoord;
+        uniform sampler2D uSampler;
+        uniform vec4 uColor;
+        uniform bool uUseTexture;
+        out vec4 fragColor;
+        void main() {
+            if (uUseTexture) {
+                fragColor = texture(uSampler, vTexCoord);
+            } else {
+                fragColor = uColor;
+            }
+        }`;
+
+        const vsBook = `#version 300 es
+        layout(location=0) in vec3 aPosition;
+        layout(location=1) in vec3 aNormal;
+        layout(location=2) in vec2 aTexCoord;
+        uniform mat4 uProjection;
+        uniform mat4 uView;
+        uniform mat4 uModel;
+        uniform float uTurnProgress;
+        uniform float uPageWidth;
+        out vec2 vTexCoord;
+        out vec3 vNormal;
+        void main() {
+            float t = uTurnProgress;
+            float theta = t * 3.14159265;
+            vec3 pos = aPosition;
+            float normalizedDist = pos.x / uPageWidth;
+            float sagAmount = -sin(theta) * uPageWidth * 0.15;
+            float sagProfile = pow(normalizedDist, 1.5); 
+            pos.z += sagAmount * sagProfile;
+            float xRot = pos.x * cos(theta) - pos.z * sin(theta);
+            float zRot = pos.x * sin(theta) + pos.z * cos(theta);
+            pos.x = xRot;
+            pos.z = zRot;
+            vec4 worldPos = uModel * vec4(pos, 1.0);
+            gl_Position = uProjection * uView * worldPos;
+            vec3 n = aNormal;
+            float nx = n.x * cos(theta) - n.z * sin(theta);
+            float nz = n.x * sin(theta) + n.z * cos(theta);
+            vNormal = mat3(uModel) * vec3(nx, n.y, nz);
+            vTexCoord = aTexCoord;
+        }`;
+
+        const fsBook = `#version 300 es
+        precision highp float;
+        in vec2 vTexCoord;
+        in vec3 vNormal;
+        uniform sampler2D uFrontTex;
+        uniform sampler2D uBackTex;
+        out vec4 fragColor;
+        void main() {
+            vec2 texCoord = vTexCoord;
+            vec4 texColor;
+            vec3 n = normalize(vNormal);
+            if (gl_FrontFacing) {
+                texColor = texture(uFrontTex, texCoord);
+            } else {
+                texCoord.x = 1.0 - texCoord.x;
+                texColor = texture(uBackTex, texCoord);
+                n = -n;
+            }
+            float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.5))), 0.4);
+            fragColor = vec4(texColor.rgb * diff, texColor.a);
+        }`;
+
+        function createProgram(gl, vs, fs) {
+            function createShader(gl, type, src) {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, src);
+                gl.compileShader(s);
+                return s;
+            }
+            const p = gl.createProgram();
+            gl.attachShader(p, createShader(gl, gl.VERTEX_SHADER, vs));
+            gl.attachShader(p, createShader(gl, gl.FRAGMENT_SHADER, fs));
+            gl.linkProgram(p);
+            return p;
+        }
+
+        const progUnlit = createProgram(gl, vsUnlit, fsUnlit);
+        const progBook = createProgram(gl, vsBook, fsBook);
+
+        const unlitUniforms = {
+            projection: gl.getUniformLocation(progUnlit, 'uProjection'),
+            view: gl.getUniformLocation(progUnlit, 'uView'),
+            model: gl.getUniformLocation(progUnlit, 'uModel'),
+            sampler: gl.getUniformLocation(progUnlit, 'uSampler'),
+            color: gl.getUniformLocation(progUnlit, 'uColor'),
+            useTexture: gl.getUniformLocation(progUnlit, 'uUseTexture'),
+        };
+
+        const bookUniforms = {
+            projection: gl.getUniformLocation(progBook, 'uProjection'),
+            view: gl.getUniformLocation(progBook, 'uView'),
+            model: gl.getUniformLocation(progBook, 'uModel'),
+            turnProgress: gl.getUniformLocation(progBook, 'uTurnProgress'),
+            pageWidth: gl.getUniformLocation(progBook, 'uPageWidth'),
+            frontTex: gl.getUniformLocation(progBook, 'uFrontTex'),
+            backTex: gl.getUniformLocation(progBook, 'uBackTex'),
+        };
+
+        // --- Geometries ---
+        // Simple Quad for Floor and Shelf
+        const quadPositions = new Float32Array([-0.5,0.5,0, 0.5,0.5,0, -0.5,-0.5,0, 0.5,-0.5,0]);
+        const quadUVs = new Float32Array([0,0, 1,0, 0,1, 1,1]);
+
+        const quadVAO = gl.createVertexArray();
+        gl.bindVertexArray(quadVAO);
+        const qPosBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qPosBuf); gl.bufferData(gl.ARRAY_BUFFER, quadPositions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+        const qUVBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qUVBuf); gl.bufferData(gl.ARRAY_BUFFER, quadUVs, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+        // Grid Plane for Book Bending
+        const bookPlane = createPlane(PAGE_WIDTH, PAGE_HEIGHT, 50, 50);
+        const bookVAO = gl.createVertexArray();
+        gl.bindVertexArray(bookVAO);
+        const bPosBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bPosBuf); gl.bufferData(gl.ARRAY_BUFFER, bookPlane.positions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+        const bNormBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bNormBuf); gl.bufferData(gl.ARRAY_BUFFER, bookPlane.normals, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+        const bUVBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bUVBuf); gl.bufferData(gl.ARRAY_BUFFER, bookPlane.uvs, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+        const bIdxBuf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bIdxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, bookPlane.indices, gl.STATIC_DRAW);
+
+        // --- Textures ---
+        function createTexture(gl) {
+            const t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255,255,255,255]));
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            return t;
+        }
+
+        const shelfTex = createTexture(gl);
+        const numPages = 6;
+        const pages = [];
+        for(let i=0; i<numPages/2; i++){
+            pages.push({
+                frontId: `page-${i*2}`, backId: `page-${i*2+1}`,
+                frontTex: createTexture(gl), backTex: createTexture(gl),
+                progress: 0, targetProgress: 0
+            });
+        }
+
+        function updateElementTexture(gl, tex, domId) {
+            if (!gl.texElementImage2D) return;
+            const el = document.getElementById(domId);
+            if (!el) return;
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texElementImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+        }
+
+        // --- State ---
+        const camera = {
+            position: glMatrix.vec3.fromValues(0, 1.7, 5),
+            rotation: glMatrix.vec3.fromValues(0, 0, 0), // Pitch, Yaw, Roll
+        };
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        const BookState = { SHELF: 0, PULLING: 1, READING: 2, RETURNING: 3 };
+        let currentBookState = BookState.SHELF;
+
+        let bookLerp = 0; // 0 = Shelf, 1 = Reader
+        const shelfPos = [0, 2, -5];
+        const shelfScale = [4, 2.4, 1]; // Maps 1000x600 ratio 1.666:1
+        
+        let targetBookPos = glMatrix.vec3.create();
+        let targetBookRot = glMatrix.vec3.create();
+        let startBookPos = glMatrix.vec3.create();
+        let startBookRot = glMatrix.vec3.create();
+
+        // Trigger interaction
+        document.getElementById('sherlock-spine').addEventListener('click', () => {
+            if (currentBookState === BookState.SHELF) {
+                currentBookState = BookState.PULLING;
+                bookLerp = 0;
+                document.getElementById('prompt').textContent = "Reading 'Scandal in Bohemia'. Use Arrow Left/Right to turn. Hit Space to close.";
+                
+                // Snap points
+                const fwd = glMatrix.vec3.fromValues(-Math.sin(camera.rotation[1]), 0, -Math.cos(camera.rotation[1]));
+                glMatrix.vec3.scaleAndAdd(targetBookPos, camera.position, fwd, 2.5); // 2.5 units in front
+                targetBookPos[1] = camera.position[1] - 0.2; // slightly lower than eye level
+                
+                targetBookRot[1] = camera.rotation[1] + 3.14159; // Face user
+                targetBookRot[0] = -0.2; // Tilt up slightly
+                
+                glMatrix.vec3.copy(startBookPos, shelfPos);
+                glMatrix.vec3.set(startBookRot, 0,0,0);
+            }
+        });
+
+        window.addEventListener('keydown', e => {
+            if (currentBookState === BookState.READING) {
+                if (e.key === 'ArrowRight') {
+                    let p = pages.find(p => p.targetProgress === 0.0);
+                    if (p) { p.targetProgress = 1.0; p.progress = Math.max(0.01, p.progress); }
+                }
+                if (e.key === 'ArrowLeft') {
+                    const reversed = [...pages].reverse();
+                    let p = reversed.find(p => p.targetProgress === 1.0);
+                    if (p) { p.targetProgress = 0.0; p.progress = Math.min(0.99, p.progress); }
+                }
+                if (e.key === ' ') { // Space to close
+                    currentBookState = BookState.RETURNING;
+                    document.getElementById('prompt').textContent = "Returning book to shelf...";
+                }
+            }
+        });
+
+        let lastTime = 0;
+        function render(time) {
+            const dt = (time - lastTime) / 1000;
+            lastTime = time;
+
+            // --- 1. Update Simulation & Physics ---
+            for (let p of pages) {
+                if (p.progress !== p.targetProgress) {
+                    const speed = 1.5;
+                    p.progress = p.progress < p.targetProgress ? Math.min(p.targetProgress, p.progress + speed * dt) : Math.max(p.targetProgress, p.progress - speed * dt);
+                }
+                updateElementTexture(gl, p.frontTex, p.frontId);
+                updateElementTexture(gl, p.backTex, p.backId);
+            }
+            updateElementTexture(gl, shelfTex, 'bookshelf');
+
+            // Book pulling animation
+            if (currentBookState === BookState.PULLING) {
+                bookLerp = Math.min(1.0, bookLerp + dt * 2.0);
+                if (bookLerp === 1.0) currentBookState = BookState.READING;
+            } else if (currentBookState === BookState.RETURNING) {
+                bookLerp = Math.max(0.0, bookLerp - dt * 2.0);
+                if (bookLerp === 0.0) {
+                    currentBookState = BookState.SHELF;
+                    document.getElementById('prompt').textContent = "Find the Sherlock Holmes book on the shelf!";
+                }
+            }
+
+            // --- 2. Camera Controls ---
+            if (currentBookState !== BookState.READING) {
+                const speed = 4.0 * dt;
+                const rotSpeed = 1.5 * dt;
+
+                if (keys['ArrowLeft']) camera.rotation[1] += rotSpeed;
+                if (keys['ArrowRight']) camera.rotation[1] -= rotSpeed;
+                if (keys['ArrowUp']) camera.rotation[0] += rotSpeed;
+                if (keys['ArrowDown']) camera.rotation[0] -= rotSpeed;
+
+                const fwd = glMatrix.vec3.fromValues(-Math.sin(camera.rotation[1]), 0, -Math.cos(camera.rotation[1]));
+                const strafe = glMatrix.vec3.fromValues(Math.cos(camera.rotation[1]), 0, -Math.sin(camera.rotation[1]));
+
+                if (keys['KeyW']) { glMatrix.vec3.scaleAndAdd(camera.position, camera.position, fwd, speed); }
+                if (keys['KeyS']) { glMatrix.vec3.scaleAndAdd(camera.position, camera.position, fwd, -speed); }
+                if (keys['KeyA']) { glMatrix.vec3.scaleAndAdd(camera.position, camera.position, strafe, -speed); }
+                if (keys['KeyD']) { glMatrix.vec3.scaleAndAdd(camera.position, camera.position, strafe, speed); }
+            }
+
+            // --- 3. Rendering ---
+            gl.clearColor(0.05, 0.05, 0.08, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.enable(gl.DEPTH_TEST);
+            gl.disable(gl.CULL_FACE);
+
+            const projection = glMatrix.mat4.create();
+            glMatrix.mat4.perspective(projection, 45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100.0);
+
+            const view = glMatrix.mat4.create();
+            glMatrix.mat4.rotateX(view, view, -camera.rotation[0]);
+            glMatrix.mat4.rotateY(view, view, -camera.rotation[1]);
+            glMatrix.mat4.translate(view, view, glMatrix.vec3.negate(glMatrix.vec3.create(), camera.position));
+
+            // [Phase A: Draw Floor & Bookshelf]
+            gl.useProgram(progUnlit);
+            gl.uniformMatrix4fv(unlitUniforms.projection, false, projection);
+            gl.uniformMatrix4fv(unlitUniforms.view, false, view);
+            gl.bindVertexArray(quadVAO);
+
+            // Floor
+            const modelFloor = glMatrix.mat4.create();
+            glMatrix.mat4.translate(modelFloor, modelFloor, [0, 0, 0]);
+            glMatrix.mat4.rotateX(modelFloor, modelFloor, -Math.PI/2);
+            glMatrix.mat4.scale(modelFloor, modelFloor, [50, 50, 1]);
+            gl.uniformMatrix4fv(unlitUniforms.model, false, modelFloor);
+            gl.uniform4f(unlitUniforms.color, 0.1, 0.1, 0.12, 1.0);
+            gl.uniform1i(unlitUniforms.useTexture, 0);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // Bookshelf
+            const modelShelf = glMatrix.mat4.create();
+            glMatrix.mat4.translate(modelShelf, modelShelf, shelfPos);
+            glMatrix.mat4.scale(modelShelf, modelShelf, shelfScale);
+            gl.uniformMatrix4fv(unlitUniforms.model, false, modelShelf);
+            gl.uniform1i(unlitUniforms.useTexture, 1);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, shelfTex);
+            gl.uniform1i(unlitUniforms.sampler, 0);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // [Phase B: Update ElementTransform for Bookshelf (Interaction)]
+            if (canvas.getElementTransform) {
+                const mvpShelf = glMatrix.mat4.create();
+                glMatrix.mat4.multiply(mvpShelf, projection, view);
+                glMatrix.mat4.multiply(mvpShelf, mvpShelf, modelShelf);
+
+                const width = 1000; const height = 600;
+                const toGLModel = new DOMMatrix().scale(1 / width, -1 / height, 1).translate(-width / 2, -height / 2);
+                const toCSSViewport = new DOMMatrix().translate(canvas.width / 2, canvas.height / 2).scale(canvas.width / 2, -canvas.height / 2, 1);
+
+                const finalTransform = toCSSViewport.multiply(new DOMMatrix(Array.from(mvpShelf))).multiply(toGLModel);
+                const t = canvas.getElementTransform(document.getElementById('draw_element'), finalTransform);
+                if (t) document.getElementById('draw_element').style.transform = t.toString();
+            }
+
+            // [Phase C: Draw Readable Book]
+            if (currentBookState !== BookState.SHELF) {
+                gl.useProgram(progBook);
+                gl.uniformMatrix4fv(bookUniforms.projection, false, projection);
+                gl.uniformMatrix4fv(bookUniforms.view, false, view);
+                gl.uniform1f(bookUniforms.pageWidth, PAGE_WIDTH);
+                gl.bindVertexArray(bookVAO);
+
+                // Smoothly interpolate position and rotation
+                const curPos = glMatrix.vec3.create();
+                glMatrix.vec3.lerp(curPos, startBookPos, targetBookPos, bookLerp);
+                
+                const curRot = glMatrix.vec3.create();
+                glMatrix.vec3.lerp(curRot, startBookRot, targetBookRot, bookLerp);
+
+                const modelBook = glMatrix.mat4.create();
+                glMatrix.mat4.translate(modelBook, modelBook, curPos);
+                glMatrix.mat4.rotateY(modelBook, modelBook, curRot[1]);
+                glMatrix.mat4.rotateX(modelBook, modelBook, curRot[0]);
+                
+                // Centering adjustment for book (pivot around spine)
+                // The shader pivots around X=0. We want the book center (middle spine) to be at 'curPos'.
+                // If the pages rotate left (X goes negative), and the spine is X=0.
+                // It's already pivoting around spine! Perfect.
+
+                for (let i = 0; i < pages.length; i++) {
+                    const p = pages[i];
+                    const t = p.progress;
+                    const zRight = -i * 0.01;
+                    const zLeft = -(pages.length - 1 - i) * 0.01;
+                    const zOffset = (1.0 - t) * zRight + t * zLeft;
+
+                    const finalBookMat = glMatrix.mat4.clone(modelBook);
+                    glMatrix.mat4.translate(finalBookMat, finalBookMat, [0, 0, zOffset]);
+
+                    gl.uniformMatrix4fv(bookUniforms.model, false, finalBookMat);
+                    gl.uniform1f(bookUniforms.turnProgress, t);
+
+                    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, p.frontTex); gl.uniform1i(bookUniforms.frontTex, 0);
+                    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, p.backTex); gl.uniform1i(bookUniforms.backTex, 1);
+
+                    gl.drawElements(gl.TRIANGLES, bookPlane.indices.length, gl.UNSIGNED_SHORT, 0);
+
+                    // Update ElementTransform for Book Pages (Reader interaction)
+                    if (canvas.getElementTransform && currentBookState === BookState.READING) {
+                        const toGLModel = new DOMMatrix().scale(PAGE_WIDTH / 800, -PAGE_HEIGHT / 1200, 1).translate(0, -1200 / 2);
+                        
+                        const flatModelFront = glMatrix.mat4.clone(modelBook);
+                        glMatrix.mat4.translate(flatModelFront, flatModelFront, [0, 0, zOffset]);
+
+                        const flatModelBack = glMatrix.mat4.clone(modelBook);
+                        glMatrix.mat4.translate(flatModelBack, flatModelBack, [0, 0, zOffset]);
+                        glMatrix.mat4.translate(flatModelBack, flatModelBack, [2.0, 0, 0]);
+                        glMatrix.mat4.scale(flatModelBack, flatModelBack, [-1, 1, 1]);
+
+                        const toCSSViewport = new DOMMatrix().translate(canvas.width / 2, canvas.height / 2).scale(canvas.width / 2, -canvas.height / 2, 1);
+
+                        // Front
+                        const mvpFront = glMatrix.mat4.create();
+                        glMatrix.mat4.multiply(mvpFront, projection, view);
+                        glMatrix.mat4.multiply(mvpFront, mvpFront, flatModelFront);
+                        const frontEl = document.getElementById(p.frontId);
+                        if (frontEl) {
+                            const finalTransformFront = toCSSViewport.multiply(new DOMMatrix(Array.from(mvpFront))).multiply(toGLModel);
+                            const tFront = canvas.getElementTransform(frontEl, finalTransformFront);
+                            if (tFront) frontEl.style.transform = tFront.toString();
+                        }
+
+                        // Back
+                        const mvpBack = glMatrix.mat4.create();
+                        glMatrix.mat4.multiply(mvpBack, projection, view);
+                        glMatrix.mat4.multiply(mvpBack, mvpBack, flatModelBack);
+                        const backEl = document.getElementById(p.backId);
+                        if (backEl) {
+                            const finalTransformBack = toCSSViewport.multiply(new DOMMatrix(Array.from(mvpBack))).multiply(toGLModel);
+                            const tBack = canvas.getElementTransform(backEl, finalTransformBack);
+                            if (tBack) backEl.style.transform = tBack.toString();
+                        }
+                    }
+                }
+            }
+
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

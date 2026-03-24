@@ -1,0 +1,759 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WebGL Billboard - Bubbly UI</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #111;
+    color: white;
+    font-family: 'Nunito', sans-serif;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  #info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none;
+    font-family: monospace;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+  
+  #draw_element {
+    width: 600px;
+    height: 600px;
+    background: transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  /* Bubbly CSS Magic */
+  .bubbly-card {
+    position: relative;
+    width: 450px;
+    height: 520px;
+    border-radius: 40px;
+    background: linear-gradient(135deg, #1e0b36 0%, #0d0620 100%);
+    box-shadow: 0 30px 60px rgba(0,0,0,0.5), inset 0 0 0 4px rgba(255,255,255,0.05);
+    overflow: hidden;
+    font-family: 'Nunito', sans-serif;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Animated background blobs */
+  .blob {
+    position: absolute;
+    filter: blur(40px);
+    z-index: 1;
+    animation: drift 10s infinite alternate ease-in-out;
+  }
+
+  .blob-1 {
+    top: -50px;
+    left: -50px;
+    width: 250px;
+    height: 250px;
+    background: #ff007f;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .blob-2 {
+    bottom: -80px;
+    right: -20px;
+    width: 300px;
+    height: 300px;
+    background: #00f0ff;
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+    opacity: 0.5;
+    animation-duration: 12s;
+    animation-direction: alternate-reverse;
+  }
+
+  @keyframes drift {
+    0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+    50% { transform: translate(30px, -30px) scale(1.1) rotate(45deg); }
+    100% { transform: translate(-20px, 40px) scale(0.9) rotate(90deg); }
+  }
+
+  .glass-content {
+    position: relative;
+    z-index: 2;
+    padding: 30px 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 40px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .title {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 900;
+    text-align: center;
+    background: linear-gradient(to right, #ff007f, #00f0ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 2px 2px 10px rgba(0,240,255,0.2);
+  }
+
+  /* Controls */
+  .controls-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .control-group label {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+  }
+
+  /* Custom input range */
+  .bubbly-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 11px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.1);
+    outline: none;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+  }
+
+  .bubbly-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ff007f;
+    cursor: pointer;
+    box-shadow: 0 0 15px #ff007f, inset 0 -3px 5px rgba(0,0,0,0.2);
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  .bubbly-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+  .bubbly-slider.color-2::-webkit-slider-thumb {
+    background: #00f0ff;
+    box-shadow: 0 0 15px #00f0ff, inset 0 -3px 5px rgba(0,0,0,0.2);
+  }
+
+  /* Toggle */
+  .toggle-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0,0,0,0.2);
+    padding: 13.5px 18px;
+    border-radius: 20px;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);
+  }
+
+  .toggle-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+  }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 54px;
+    height: 31px;
+  }
+
+  .switch input { 
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255,255,255,0.1);
+    transition: .4s;
+    border-radius: 34px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+  }
+
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 24px;
+    width: 24px;
+    left: 3.5px;
+    bottom: 3.5px;
+    background-color: white;
+    transition: .4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    border-radius: 50%;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  }
+
+  input:checked + .slider {
+    background-color: #00f0ff;
+    box-shadow: 0 0 15px rgba(0,240,255,0.5), inset 0 2px 4px rgba(0,0,0,0.4);
+  }
+
+  input:checked + .slider:before {
+    transform: translateX(23px);
+  }
+
+  /* Stats */
+  .stats-container {
+    display: flex;
+    gap: 13px;
+  }
+
+  .stat-box {
+    flex: 1;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 9px;
+    text-align: center;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    transition: transform 0.3s;
+  }
+  .stat-box:hover {
+    transform: translateY(-5px);
+  }
+
+  .stat-value {
+    font-size: 20px;
+    font-weight: 900;
+    background: linear-gradient(45deg, #ff9a9e 0%, #fecfef 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .color-stat .stat-value {
+    background: linear-gradient(45deg, #00f0ff 0%, #00ff88 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: rgba(255,255,255,0.6);
+    margin-top: 5px;
+  }
+
+  .pulse-box {
+    animation: stat-pulse 2s infinite;
+    border-color: rgba(0, 240, 255, 0.4);
+  }
+  
+  @keyframes stat-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(0,240,255,0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(0,240,255,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,240,255,0); }
+  }
+
+  /* Buttons */
+  .action-buttons {
+    display: flex;
+    gap: 13px;
+  }
+
+  .btn {
+    flex: 1;
+    border: none;
+    padding: 11px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #ff007f, #8e2de2);
+    color: white;
+    box-shadow: 0 10px 20px rgba(255,0,127,0.3), inset 0 2px 0 rgba(255,255,255,0.2);
+  }
+  .btn-primary:active {
+    transform: scale(0.95);
+    box-shadow: 0 5px 10px rgba(255,0,127,0.3);
+  }
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 25px rgba(255,0,127,0.4), inset 0 2px 0 rgba(255,255,255,0.3);
+  }
+
+  .btn-secondary {
+    background: linear-gradient(135deg, #00f0ff, #005ce6);
+    color: white;
+    box-shadow: 0 10px 20px rgba(0,240,255,0.3), inset 0 2px 0 rgba(255,255,255,0.2);
+  }
+  .btn-secondary:active {
+    transform: scale(0.95);
+    box-shadow: 0 5px 10px rgba(0,240,255,0.3);
+  }
+  .btn-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 25px rgba(0,240,255,0.4), inset 0 2px 0 rgba(255,255,255,0.3);
+  }
+
+  /* Emojis */
+  .emoji-bar {
+    display: flex;
+    justify-content: space-around;
+    padding: 9px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 30px;
+    margin-top: 5px;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+    position: relative;
+    gap: 18px;
+  }
+
+  .emoji {
+    font-size: 22px;
+    user-select: none;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .emoji:hover {
+    transform: scale(1.5) rotate(10deg);
+  }
+
+  .bouncing {
+    animation: bounce 2s infinite ease-in-out;
+  }
+
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .emoji:nth-child(1) { animation-delay: 0.1s; }
+  .emoji:nth-child(2) { animation-delay: 0.2s; }
+  .emoji:nth-child(3) { animation-delay: 0.3s; }
+  .emoji:nth-child(4) { animation-delay: 0.4s; }
+  .emoji:nth-child(5) { animation-delay: 0.5s; }
+
+  @keyframes float-up-fade {
+    0% { transform: translate(0, 0) scale(1); opacity: 1; }
+    50% { transform: translate(0, -50px) scale(1.5); opacity: 0.8; }
+    100% { transform: translate(0, -100px) scale(2); opacity: 0; }
+  }
+  .exploding-emoji {
+    position: absolute;
+    pointer-events: none;
+    z-index: 100;
+    animation: float-up-fade 1s ease-out forwards;
+    font-size: 22px;
+  }
+
+</style>
+
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+
+<div id="info">
+  Arrow Keys: Look Around<br>
+  WASD: Move Camera<br>
+</div>
+
+<canvas id="gl-canvas" layoutsubtree="true">
+  <div id="draw_element">
+    <div class="bubbly-card" id="main-card">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      
+      <div class="glass-content">
+        <h1 class="title">Bubbly UI ✨</h1>
+        
+        <div class="controls-grid">
+          <div class="control-group">
+            <label>Master Volume</label>
+            <input type="range" class="bubbly-slider" min="0" max="100" value="70">
+          </div>
+          
+          <div class="control-group">
+            <label>Neon Intensity</label>
+            <input type="range" id="neon-slider" class="bubbly-slider color-2" min="0" max="360" value="0">
+          </div>
+        </div>
+        
+        <div class="toggle-container">
+          <span class="toggle-label">Auto Sequence Mode</span>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span class="slider round"></span>
+          </label>
+        </div>
+        
+        <div class="stats-container">
+          <div class="stat-box">
+            <div class="stat-value">92%</div>
+            <div class="stat-label">Power</div>
+          </div>
+          <div class="stat-box pulse-box color-stat">
+            <div class="stat-value">ACTIVE</div>
+            <div class="stat-label">Status</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">14k</div>
+            <div class="stat-label">Points</div>
+          </div>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn btn-primary">Engage 🚀</button>
+          <button class="btn btn-secondary">Chill ❄️</button>
+        </div>
+        
+        <div class="emoji-bar">
+          <div class="emoji bouncing">💖</div>
+          <div class="emoji bouncing">🔥</div>
+          <div class="emoji bouncing">🌟</div>
+          <div class="emoji bouncing">🎉</div>
+          <div class="emoji bouncing">🦄</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</canvas>
+
+<script>
+  const glMatrix = { vec3: window.vec3, mat4: window.mat4 };
+  const canvas = document.getElementById('gl-canvas');
+  const gl = canvas.getContext('webgl2');
+
+  const draw_element = document.getElementById('draw_element');
+
+  if (!gl) {
+    alert('WebGL2 not supported');
+  }
+
+  // Shader Sources
+  const vsSource = `#version 300 es
+layout(location = 0) in vec4 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
+
+out vec2 vTexCoord;
+
+void main() {
+  gl_Position = uProjectionMatrix * uModelViewMatrix * aPosition;
+  vTexCoord = aTexCoord;
+}
+`;
+
+  const fsSource = `#version 300 es
+precision highp float;
+
+in vec2 vTexCoord;
+uniform sampler2D uSampler;
+uniform vec4 uColor;
+uniform bool uUseTexture;
+
+out vec4 fragColor;
+
+void main() {
+  if (uUseTexture) {
+    fragColor = texture(uSampler, vTexCoord);
+  } else {
+    fragColor = uColor;
+  }
+}
+`;
+
+  // Initialize Shader Program
+  function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+  }
+
+  const programInfo = {
+    program: program,
+    attribs: {
+      position: gl.getAttribLocation(program, 'aPosition'),
+      texCoord: gl.getAttribLocation(program, 'aTexCoord'),
+    },
+    uniforms: {
+      projection: gl.getUniformLocation(program, 'uProjectionMatrix'),
+      modelView: gl.getUniformLocation(program, 'uModelViewMatrix'),
+      sampler: gl.getUniformLocation(program, 'uSampler'),
+      color: gl.getUniformLocation(program, 'uColor'),
+      useTexture: gl.getUniformLocation(program, 'uUseTexture'),
+    },
+  };
+
+  // Quad (Unit size, centered at origin)
+  const positions = new Float32Array([
+    -0.5,  0.5, 0.0,
+     0.5,  0.5, 0.0,
+    -0.5, -0.5, 0.0,
+     0.5, -0.5, 0.0,
+  ]);
+
+  const texCoords = new Float32Array([
+    0.0, 0.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+  ]);
+
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+  const texCoordBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
+
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.enableVertexAttribArray(programInfo.attribs.position);
+  gl.vertexAttribPointer(programInfo.attribs.position, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+  gl.enableVertexAttribArray(programInfo.attribs.texCoord);
+  gl.vertexAttribPointer(programInfo.attribs.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+  // Texture Initialization (HTML Element)
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 600, 600, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+
+  // Camera State
+  const camera = {
+    position: glMatrix.vec3.fromValues(0, 2, 8),
+    rotation: glMatrix.vec3.fromValues(-0.1, 0, 0), // Pitch, Yaw, Roll
+  };
+
+  const keys = {};
+  window.addEventListener('keydown', (e) => keys[e.code] = true);
+  window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+  let lastTime = 0;
+  function render(time) {
+    time *= 0.001;
+    const deltaTime = time - lastTime;
+    lastTime = time;
+
+    const speed = 5.0 * deltaTime;
+    const rotSpeed = 2.0 * deltaTime;
+
+    if (keys['ArrowLeft']) camera.rotation[1] += rotSpeed;
+    if (keys['ArrowRight']) camera.rotation[1] -= rotSpeed;
+    if (keys['ArrowUp']) camera.rotation[0] += rotSpeed;
+    if (keys['ArrowDown']) camera.rotation[0] -= rotSpeed;
+
+    const fwd = glMatrix.vec3.fromValues(
+      -Math.sin(camera.rotation[1]), 
+      0, 
+      -Math.cos(camera.rotation[1])
+    );
+    const strafe = glMatrix.vec3.fromValues(
+      Math.cos(camera.rotation[1]), 
+      0, 
+      -Math.sin(camera.rotation[1])
+    );
+
+    if (keys['KeyW']) {
+      camera.position[0] += fwd[0] * speed;
+      camera.position[2] += fwd[2] * speed;
+    }
+    if (keys['KeyS']) {
+      camera.position[0] -= fwd[0] * speed;
+      camera.position[2] -= fwd[2] * speed;
+    }
+    if (keys['KeyA']) {
+      camera.position[0] -= strafe[0] * speed;
+      camera.position[2] -= strafe[2] * speed;
+    }
+    if (keys['KeyD']) {
+      camera.position[0] += strafe[0] * speed;
+      camera.position[2] += strafe[2] * speed;
+    }
+
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.clearColor(0.08, 0.08, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const projectionMatrix = glMatrix.mat4.create();
+    glMatrix.mat4.perspective(projectionMatrix, 45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100.0);
+
+    const viewMatrix = glMatrix.mat4.create();
+    glMatrix.mat4.rotateX(viewMatrix, viewMatrix, -camera.rotation[0]);
+    glMatrix.mat4.rotateY(viewMatrix, viewMatrix, -camera.rotation[1]);
+    glMatrix.mat4.translate(viewMatrix, viewMatrix, glMatrix.vec3.negate(glMatrix.vec3.create(), camera.position));
+
+    gl.useProgram(programInfo.program);
+    gl.uniformMatrix4fv(programInfo.uniforms.projection, false, projectionMatrix);
+
+    gl.bindVertexArray(vao);
+
+    const modelViewMatrix = glMatrix.mat4.create();
+    glMatrix.mat4.copy(modelViewMatrix, viewMatrix);
+
+    // Floor
+    const floorMatrix = glMatrix.mat4.clone(modelViewMatrix);
+    glMatrix.mat4.translate(floorMatrix, floorMatrix, [0, -2, 0]);
+    glMatrix.mat4.rotateX(floorMatrix, floorMatrix, -Math.PI / 2);
+    glMatrix.mat4.scale(floorMatrix, floorMatrix, [30, 30, 1]);
+    gl.uniformMatrix4fv(programInfo.uniforms.modelView, false, floorMatrix);
+    gl.uniform4f(programInfo.uniforms.color, 0.15, 0.1, 0.2, 1.0);
+    gl.uniform1i(programInfo.uniforms.useTexture, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Dynamic floating rotation for billboard
+    const floatRot = Math.sin(time * 0.5) * 0.05;
+
+    // Draw Billboard
+    const billboardMatrix = glMatrix.mat4.clone(modelViewMatrix);
+    glMatrix.mat4.translate(billboardMatrix, billboardMatrix, [0, 1.5, 0]); // Removed vertical float
+    glMatrix.mat4.rotateY(billboardMatrix, billboardMatrix, floatRot);
+    glMatrix.mat4.rotateX(billboardMatrix, billboardMatrix, floatRot * 0.5);
+    glMatrix.mat4.scale(billboardMatrix, billboardMatrix, [5, 5, 1]); // Size = 5x5
+
+    const mvp = glMatrix.mat4.create();
+    glMatrix.mat4.multiply(mvp, projectionMatrix, billboardMatrix);
+
+    const adjustment = glMatrix.mat4.create();
+    glMatrix.mat4.translate(adjustment, adjustment, [-0.5, 0.5, 0]);
+    glMatrix.mat4.scale(adjustment, adjustment, [1, -1, 1]);
+
+    const finalDrawTransform = glMatrix.mat4.create();
+    glMatrix.mat4.multiply(finalDrawTransform, mvp, adjustment);
+
+    if (canvas.getElementTransform) {
+      const mvpDOM = new DOMMatrix(Array.from(mvp));
+
+      const width = draw_element.offsetWidth;
+      const height = draw_element.offsetHeight;
+
+      const toGLModel = new DOMMatrix()
+        .scale(1 / width, -1 / height, 1)
+        .translate(-width / 2, -height / 2);
+
+      const toCSSViewport = new DOMMatrix()
+        .translate(canvas.width / 2, canvas.height / 2)
+        .scale(canvas.width / 2, -canvas.height / 2, 1);
+
+      const finalTransform = toCSSViewport.multiply(mvpDOM).multiply(toGLModel);
+
+      const transform = canvas.getElementTransform(draw_element, finalTransform);
+      if (transform) {
+        draw_element.style.transform = transform.toString();
+      }
+    }
+
+    if (gl.texElementImage2D) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texElementImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, draw_element);
+    }
+    
+    gl.uniformMatrix4fv(programInfo.uniforms.modelView, false, billboardMatrix);
+    gl.uniform1i(programInfo.uniforms.useTexture, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform1i(programInfo.uniforms.sampler, 0);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+
+  // UI Interactions
+  const neonSlider = document.getElementById('neon-slider');
+  const mainCard = document.getElementById('main-card');
+  neonSlider.addEventListener('input', (e) => {
+    const hueOffset = Number(e.target.value);
+    mainCard.style.background = `linear-gradient(135deg, hsl(${260 + hueOffset}, 60%, 15%) 0%, hsl(${250 + hueOffset}, 60%, 10%) 100%)`;
+  });
+
+  const emojiBar = document.querySelector('.emoji-bar');
+  const emojis = document.querySelectorAll('.emoji.bouncing');
+  emojis.forEach(emoji => {
+    emoji.addEventListener('click', (e) => {
+      const clone = document.createElement('div');
+      clone.innerText = emoji.textContent.trim().split('\n')[0];
+      clone.className = 'exploding-emoji';
+      
+      const randomX = (Math.random() - 0.5) * 30;
+      clone.style.left = (emoji.offsetLeft + randomX) + 'px';
+      clone.style.top = emoji.offsetTop + 'px';
+      
+      emojiBar.appendChild(clone);
+      setTimeout(() => clone.remove(), 1000);
+    });
+  });
+</script>
